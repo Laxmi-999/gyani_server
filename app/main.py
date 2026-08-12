@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import  CORSMiddleware
-from app.routers import auth
+from app.routers import auth, notes
+
 
 app = FastAPI(title = "Gyani API", version = "0.1.0")
 
@@ -12,6 +13,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth.router)
+app.include_router(notes.router)
+
 @app.get("/")
 def home():
     print("welcome to home")
