@@ -14,5 +14,12 @@ class UserOut(BaseModel):
         class Config:
             from_attributes = True
 
+class Token(BaseModel):
+     access_token:str
+     token_type:str = "bearer"
+
+class TokenData(BaseModel):
+     user_id:int | None = None
+
 # in this file (PYNDATIC) defines how data is formatted and validated over the HTTP API network
 # main responsibility" validate incoming request JSON payloads and shapes outgoing response JSON.
