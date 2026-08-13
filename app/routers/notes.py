@@ -30,7 +30,7 @@ def list_notes(
     query = db.query(Note).filter(Note.owner_id == current_user.id)
     if q:
         query = query.filter(Note.content.ilike(f"%{q}%") | Note.title.ilike("f%{q}%"))
-        return query.order_by(Note.created_at.desc()).all()
+    return query.order_by(Note.created_at.desc()).all()
 
 @router.get("/{note_id}", response_model = NoteOut)
 def get_note(
@@ -40,7 +40,7 @@ def get_note(
 ):
     return _get_owned_note(db,note_id, current_user.id)
 
-@router.patch("/{note}", response_model = NoteOut)
+@router.patch("/{note_id}", response_model = NoteOut)
 def update_note(
     note_id: int,
     note_in : NoteUpdate,
