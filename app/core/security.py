@@ -1,6 +1,6 @@
 from passlib.context import CryptContext
 from datetime import datetime,timedelta
-from jose import jwt
+from jose import JWTError, jwt
 from app.config import settings
 
 pwd_context =CryptContext(schemes = ["bcrypt"], deprecated="auto" )
@@ -20,7 +20,21 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
+def create_refresh_token(data:dict, expires_delta:timedelta | None = None)->str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (
+        expires_delta or timedelta(days = settings.refresh_token_expire_days)  #e.g, 7
+    )
+    to_encode.update({"exp":expire, "type":"refresh"})
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
+
+
 # Decodes and verifies a JWT access token
-def decode_access_token(token: str) -> dict:
-    return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-    
+def decode_access_token(token: str, expected_type:str = "access") -> dict:
+    """Decodes and validates token signature, expiration, and token type"""
+    payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+
+    token_type = payload.get("type")
+    if(token_type != expected_type):
+        raise JWTError(f"Invalida token type : expected {expected_type}, got {token_type}")
+    return payload
