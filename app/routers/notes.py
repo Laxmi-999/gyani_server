@@ -50,9 +50,9 @@ def update_note(
     note = _get_owned_note(db, note_id, current_user.id)
     for field, value in note_in.model_dump(exclude_unset = True). items():
         setattr(note, field, value)
-        db.commit()
-        db.refresh(note)
-        return note
+    db.commit()
+    db.refresh(note)
+    return note
 
 @router.delete("/{note_id}", status_code = 204)
 def delete_note(
