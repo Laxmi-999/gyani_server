@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import  CORSMiddleware
-from app.routers import auth, notes
+from app.routers import auth, notes,files
+
 
 
 app = FastAPI(title = "Gyani API", version = "0.1.0")
@@ -14,6 +15,7 @@ app.add_middleware(
 )
 app.include_router(auth.router)
 app.include_router(notes.router)
+app.include_router(files.router)
 
 @app.get("/")
 def home():
