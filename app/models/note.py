@@ -13,3 +13,4 @@ class Note(Base):
     created_at = Column(DateTime, default = datetime.utcnow)
     updated_at = Column(DateTime, default = datetime.utcnow, onupdate =datetime.utcnow)
     owner = relationship("User", back_populates = "notes")
+    files = relationship("FileAttachment", back_populates="note") # Added this line

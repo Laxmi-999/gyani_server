@@ -1,7 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import  CORSMiddleware
 from app.routers import auth, notes,files
+from app.models.file import FileAttachment
+from app.database import engine, Base
 
+
+
+
+Base.metadata.create_all(bind=engine)
 
 
 app = FastAPI(title = "Gyani API", version = "0.1.0")

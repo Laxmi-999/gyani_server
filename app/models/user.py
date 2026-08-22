@@ -12,5 +12,6 @@ class User(Base):
     hashed_password =Column(String, nullable=False)
     created_at =Column(DateTime, default=datetime.utcnow)
     notes = relationship("Note", back_populates = "owner", cascade = "all, delete-orphan")
+    files = relationship("FileAttachment", back_populates="owner", cascade="all, delete-orphan")
     # in this file, (SQLAlchemy) defines how data is stored inside the database
     # main responsibility: maps python classes directly to  PostgreSQL/MYSQL database tables

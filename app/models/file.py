@@ -7,9 +7,9 @@ from app.database import Base
 class FileAttachment(Base):
     __tablename__ = "files"
 
-    id = Column(Integer, Primary_key=True, index=True)
-    owner_id = Column(Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
-    note_id = Column(Integer, ForeignKey("note.id", ondelete="SET NULL"), nullable =True)
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    note_id = Column(Integer, ForeignKey("notes.id", ondelete="SET NULL"), nullable =True)
 
     filename = Column(String, nullable = False)
     file_path = Column(String, nullable = False)
