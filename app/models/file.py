@@ -2,6 +2,14 @@ from  datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
+import enum
+
+
+class ORCStatus(str, enum.Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "Completed"
+    FAILED = "failed"
 
 
 class FileAttachment(Base):
@@ -16,6 +24,7 @@ class FileAttachment(Base):
     content_type = Column(String, nullable = False)
     file_size = Column(Integer, nullable =  False)
     uploaded_at = Column(DateTime, default = datetime.utcnow)
+    ocr_status = Column(String, default = ORCStatus.PENDING.value)
 
     # Relationships
     owner  = relationship("User", back_populates ="files")

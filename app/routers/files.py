@@ -1,22 +1,25 @@
 import os
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
-from app.database import get_db
-from app.models.file import FileAttachment
+from app.database import get_db, SessionLocal
+from app.models.file import FileAttachment, OCRStatus
 from app.models.user import User
 from app.schemas.file import FileOut
+from app.services.ocr import process_image_ocr
 
 router = APIRouter(prefix="/files", tags=["files"])
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff"]
 
 @router.post("/", response_model=FileOut, status_code=status.HTTP_201_CREATED)
 async def upload_file(
+    background_tasks:BackgroundTasks,
     file: UploadFile = File(...),
     note_id: int | None = Form(None),
     db: Session = Depends(get_db),
@@ -33,6 +36,8 @@ async def upload_file(
 
     with open(saved_path, "wb") as f:
         f.write(content)
+    content_type = file.content_type or "application/octet-stream"
+    is_image = content_type  in IMAGE_MIME_TYPES
 
     db_file = FileAttachment(
         owner_id=current_user.id,
@@ -41,10 +46,13 @@ async def upload_file(
         file_path=saved_path,
         content_type=file.content_type or "application/octet-stream",
         file_size=file_size,
+        ocr_status = OCRStatus.PENDING.value if is_image else None,
     )
     db.add(db_file)
     db.commit()
     db.refresh(db_file)
+    if is_image:
+        background_tasks.add_task(process_image_ocr, db_file.id, SessionLocal)
     return db_file
 
 
