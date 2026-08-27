@@ -1,6 +1,8 @@
 from logging.config import fileConfig
 from app.database import Base
-from  app.models import User
+from  app.models.user import User
+from app.models.file import FileAttachment
+from app.models.note import Note
 from  app.config import settings
 
 from sqlalchemy import engine_from_config

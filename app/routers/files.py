@@ -19,7 +19,7 @@ IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/bmp", "image
 
 @router.post("/", response_model=FileOut, status_code=status.HTTP_201_CREATED)
 async def upload_file(
-    background_tasks:BackgroundTasks,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     note_id: int | None = Form(None),
     db: Session = Depends(get_db),
@@ -36,23 +36,26 @@ async def upload_file(
 
     with open(saved_path, "wb") as f:
         f.write(content)
+        
     content_type = file.content_type or "application/octet-stream"
-    is_image = content_type  in IMAGE_MIME_TYPES
+    is_image = content_type in IMAGE_MIME_TYPES
 
     db_file = FileAttachment(
         owner_id=current_user.id,
         note_id=note_id,
         filename=file.filename,
         file_path=saved_path,
-        content_type=file.content_type or "application/octet-stream",
+        content_type=content_type,
         file_size=file_size,
-        ocr_status = OCRStatus.PENDING.value if is_image else None,
+        ocr_status=OCRStatus.PENDING.value if is_image else None,
     )
     db.add(db_file)
     db.commit()
     db.refresh(db_file)
+
     if is_image:
         background_tasks.add_task(process_image_ocr, db_file.id, SessionLocal)
+
     return db_file
 
 
