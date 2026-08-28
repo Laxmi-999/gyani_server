@@ -1,5 +1,3 @@
-import os
-import uuid
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -10,12 +8,14 @@ from app.models.file import FileAttachment, OCRStatus
 from app.models.user import User
 from app.schemas.file import FileOut
 from app.services.ocr import process_image_ocr
+from app.helpers.file_helpers import (
+    is_processable_file,
+    save_upload_file_to_disk,
+    remove_file_from_disk,
+)
 
 router = APIRouter(prefix="/files", tags=["files"])
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff"]
 
 @router.post("/", response_model=FileOut, status_code=status.HTTP_201_CREATED)
 async def upload_file(
@@ -25,35 +25,28 @@ async def upload_file(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Create unique filename on disk to avoid collisions
-    file_ext = os.path.splitext(file.filename)[1]
-    unique_filename = f"{uuid.uuid4()}{file_ext}"
-    saved_path = os.path.join(UPLOAD_DIR, unique_filename)
-
-    # Read and save file content
-    content = await file.read()
-    file_size = len(content)
-
-    with open(saved_path, "wb") as f:
-        f.write(content)
-        
+    # Save binary file to disk using utility helper
+    saved_path, file_ext, file_size = await save_upload_file_to_disk(file)
     content_type = file.content_type or "application/octet-stream"
-    is_image = content_type in IMAGE_MIME_TYPES
+
+    # Evaluate if file is eligible for background text extraction
+    processable = is_processable_file(content_type, file_ext)
 
     db_file = FileAttachment(
         owner_id=current_user.id,
         note_id=note_id,
-        filename=file.filename,
+        filename=file.filename or "unnamed_file",
         file_path=saved_path,
         content_type=content_type,
         file_size=file_size,
-        ocr_status=OCRStatus.PENDING.value if is_image else None,
+        ocr_status=OCRStatus.PENDING.value if processable else None,
     )
     db.add(db_file)
     db.commit()
     db.refresh(db_file)
 
-    if is_image:
+    # Trigger background worker for supported file types
+    if processable:
         background_tasks.add_task(process_image_ocr, db_file.id, SessionLocal)
 
     return db_file
@@ -77,7 +70,7 @@ def download_file(
         FileAttachment.id == file_id, FileAttachment.owner_id == current_user.id
     ).first()
 
-    if not db_file or not os.path.exists(db_file.file_path):
+    if not db_file or not FileResponse(db_file.file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(
@@ -100,10 +93,7 @@ def delete_file(
     if not db_file:
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Delete from disk
-    if os.path.exists(db_file.file_path):
-        os.remove(db_file.file_path)
-
-    # Delete row from DB
+    # Safely cleanup file on disk and remove row from DB
+    remove_file_from_disk(db_file.file_path)
     db.delete(db_file)
     db.commit()
