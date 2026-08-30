@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from arq.connection import RedisSettings
 
 from app.core.deps import get_current_user
 from app.database import get_db, SessionLocal
@@ -13,8 +14,11 @@ from app.helpers.file_helpers import (
     save_upload_file_to_disk,
     remove_file_from_disk,
 )
+from app.core.redis import get_redis_pool
 
 router = APIRouter(prefix="/files", tags=["files"])
+async def get_redis():
+    return await create_pool(RedisSettings(host="localhost", port = 6379))
 
 
 @router.post("/", response_model=FileOut, status_code=status.HTTP_201_CREATED)
@@ -47,7 +51,8 @@ async def upload_file(
 
     # Trigger background worker for supported file types
     if processable:
-        background_tasks.add_task(process_image_ocr, db_file.id, SessionLocal)
+        redis = await get_redis_pool()
+        await redis.enqueue_job("process_file_ocr", db_file.id)    
 
     return db_file
 
