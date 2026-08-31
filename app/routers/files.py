@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from arq.connection import RedisSettings
+from arq.connections import RedisSettings
 
 from app.core.deps import get_current_user
 from app.database import get_db, SessionLocal
@@ -23,7 +23,6 @@ async def get_redis():
 
 @router.post("/", response_model=FileOut, status_code=status.HTTP_201_CREATED)
 async def upload_file(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     note_id: int | None = Form(None),
     db: Session = Depends(get_db),

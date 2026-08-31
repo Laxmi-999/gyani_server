@@ -3,13 +3,10 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from app.database import Base
+from app.models.enums import OCRStatus
 
 
-class OCRStatus(str, enum.Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"  # Changed to lowercase to stay consistent
-    FAILED = "failed"
+
 
 
 class FileAttachment(Base):

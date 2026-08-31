@@ -1,3 +1,4 @@
+import os
 import logging
 from PIL import Image
 import pytesseract
@@ -79,6 +80,28 @@ def extract_text_from_excel(excel_path: str) -> str:
         logger.error(f"[Excel Extraction Error]: {e}")
         return ""
 
+
+def extract_text_from_file(file_path: str, content_type: str = "") -> str:
+    """
+    Main dispatcher: Routes file extraction based on extension or MIME type.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext in [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"]:
+        return extract_text_from_image(file_path)
+    elif ext == ".pdf":
+        return extract_text_from_pdf(file_path)
+    elif ext in [".docx", ".doc"]:
+        return extract_text_from_docx(file_path)
+    elif ext in [".xlsx", ".xls"]:
+        return extract_text_from_excel(file_path)
+    elif ext in [".txt", ".md", ".csv", ".json", ".log"]:
+        return extract_text_from_txt(file_path)
+    else:
+        logger.warning(f"Unsupported file extension for extraction: {ext}")
+        return ""
+
+    
 def extract_text_from_txt(txt_path: str) -> str:
     """Extracts content from plain text, markdown, CSV, or JSON files."""
     try:
