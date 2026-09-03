@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text,JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.models.enums import OCRStatus
@@ -22,6 +22,7 @@ class FileAttachment(Base):
     file_size = Column(Integer, nullable=False)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     ocr_status = Column(String, default=OCRStatus.PENDING.value)
+    entities = Column(JSON, nullable=True, default = dict)
     
     # ADD THIS LINE:
     extracted_text = Column(Text, nullable=True)
