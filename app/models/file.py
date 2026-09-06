@@ -1,12 +1,10 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text,JSON
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.models.enums import OCRStatus
-
-
-
+from typing import Any, Optional
 
 
 class FileAttachment(Base):
@@ -22,11 +20,15 @@ class FileAttachment(Base):
     file_size = Column(Integer, nullable=False)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     ocr_status = Column(String, default=OCRStatus.PENDING.value)
-    entities = Column(JSON, nullable=True, default = dict)
-    
-    # ADD THIS LINE:
+    entities = Column(JSON, nullable=True, default=dict)   
     extracted_text = Column(Text, nullable=True)
 
     # Relationships
     owner = relationship("User", back_populates="files")
-    note = relationship("Note", back_populates="files")
+
+    # Explicitly specify note_id as the foreign key for this relationship
+    note = relationship(
+        "Note", 
+        back_populates="files", 
+        foreign_keys=[note_id]
+    )

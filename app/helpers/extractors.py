@@ -6,6 +6,7 @@ import pdfplumber
 from pdf2image import convert_from_path
 import docx
 import openpyxl
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,20 @@ def extract_text_from_image(image_path: str) -> str:
         return raw_text.strip() if raw_text else ""
     except Exception as e:
         logger.error(f"[Image OCR Error]: {e}")
+        return ""
+
+    
+def extract_text_from_html(html_path: str) -> str:
+    """Strips HTML markup and extracts plain text content."""
+    try:
+        with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+            soup = BeautifulSoup(f.read(), "html.parser")
+            # Strip script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
+            return soup.get_text(separator="\n", strip=True)
+    except Exception as e:
+        logger.error(f"[HTML Extraction Error]: {e}")
         return ""
 
 
@@ -95,6 +110,8 @@ def extract_text_from_file(file_path: str, content_type: str = "") -> str:
         return extract_text_from_docx(file_path)
     elif ext in [".xlsx", ".xls"]:
         return extract_text_from_excel(file_path)
+    elif ext in [".html", ".htm"]:
+        return extract_text_from_html(file_path)
     elif ext in [".txt", ".md", ".csv", ".json", ".log"]:
         return extract_text_from_txt(file_path)
     else:

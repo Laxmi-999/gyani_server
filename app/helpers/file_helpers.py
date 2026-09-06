@@ -2,12 +2,12 @@ import os
 import uuid
 from fastapi import UploadFile
 
-from app.helpers.constants import UPLOAD_DIR, IMAGE_MIME_TYPES, DOC_EXTENSIONS
+from app.helpers.constants import UPLOAD_DIR, IMAGE_MIME_TYPES, DOC_EXTENSIONS,HTML_MIME_TYPES
 
 
 def is_processable_file(content_type: str, file_ext: str) -> bool:
     """Checks whether the uploaded file supports text extraction/OCR."""
-    return (content_type in IMAGE_MIME_TYPES) or (file_ext.lower() in DOC_EXTENSIONS)
+    return (content_type in IMAGE_MIME_TYPES) or  (content_type in HTML_MIME_TYPES) or (file_ext.lower() in DOC_EXTENSIONS)
 
 
 async def save_upload_file_to_disk(file: UploadFile) -> tuple[str, str, int]:
@@ -23,7 +23,6 @@ async def save_upload_file_to_disk(file: UploadFile) -> tuple[str, str, int]:
 
     content = await file.read()
     file_size = len(content)
-
     with open(saved_path, "wb") as f:
         f.write(content)
 

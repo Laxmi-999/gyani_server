@@ -16,6 +16,10 @@ IMAGE_MIME_TYPES = [
     "image/heic",
     "image/heif",
 ]
+HTML_MIME_TYPES = [
+    "text/html",
+    "application/xhtml+xml",
+]
 
 # Supported Document & Spreadsheet Extensions
 DOC_EXTENSIONS = [
@@ -37,4 +41,6 @@ DOC_EXTENSIONS = [
     ".md",
     ".json",
     ".log",
+    ".htm",
+    ".html",
 ]
