@@ -2,6 +2,8 @@ from datetime import datetime
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
+from pgvector.sqlalchemy import Vector
+
 
 
 class Note(Base):
@@ -26,6 +28,8 @@ class Note(Base):
     source_file_id = Column(
         Integer, ForeignKey("files.id"), nullable=True
     )
+
+    embedding = Column(Vector(384), nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(

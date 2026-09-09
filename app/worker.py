@@ -6,6 +6,8 @@ from app.models.enums import OCRStatus
 from app.models.file import FileAttachment
 from app.models.note import Note
 from arq.connections import RedisSettings
+from app.services.embedding import generate_embedding
+
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,7 @@ async def process_file_ocr(ctx: dict, file_id: int):
         )
         extracted_text = extract_text_from_file(db_file.file_path)
         db_file.extracted_text = extracted_text
+        
 
         entities = {}
         flattened_tags = []
@@ -76,6 +79,8 @@ async def process_file_ocr(ctx: dict, file_id: int):
 
         # 4. Create or Update corresponding Note record
         title = derive_note_title(db_file.filename, entities)
+        note_text_to_embed = f"{title}\n{extracted_text or ''}"
+        embedding_vector = generate_embedding(note_text_to_embed)
 
         # Check if note already exists for this source file to prevent duplicate creation on retries
         existing_note = (
@@ -89,6 +94,8 @@ async def process_file_ocr(ctx: dict, file_id: int):
             )
             existing_note.entities = entities
             existing_note.auto_tags = flattened_tags
+            existing_note.embedding = embedding_vector
+            db_file.note_id = existing_note.id
         else:
             new_note = Note(
                 owner_id=db_file.owner_id,
@@ -98,6 +105,7 @@ async def process_file_ocr(ctx: dict, file_id: int):
                 entities=entities,
                 auto_tags=flattened_tags,
                 source_file_id=db_file.id,
+                embedding = embedding_vector,
             )
             db.add(new_note)
             db.flush()
