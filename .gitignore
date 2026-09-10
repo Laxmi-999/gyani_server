@@ -1,2 +1,15 @@
-# Environment and secrets
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment variables & secrets
 .env
+
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+
+# IDEs
+.vscode/
+.idea/
