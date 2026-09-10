@@ -1,10 +1,12 @@
-from app.db.session  import SessionLocal
+from app.database import SessionLocal
 from app.models.note import Note 
+from app.models.file import FileAttachment
+from app.models.user import User
 from app.services.embedding import generate_embedding
 
 def run_test():
     db = SessionLocal()
-    search-query = "how do i protect my endpoints"
+    search_query = "what are MERN stack project ideas"
     print(f"\n --- Generating embedding for query : '{search_query}' ---")
     query_vector = generate_embedding(search_query)
 

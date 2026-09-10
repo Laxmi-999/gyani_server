@@ -144,4 +144,4 @@ async def process_file_ocr(ctx: dict, file_id: int):
 
 class WorkerSettings:
     functions = [process_file_ocr]
-    redis_settings = RedisSettings(host="localhost", port=6379)
+    redis_settings = RedisSettings(host="127.0.0.1", port=6379)

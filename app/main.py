@@ -3,12 +3,17 @@ from fastapi.middleware.cors import  CORSMiddleware
 from app.routers import auth, notes,files
 from app.models.file import FileAttachment
 from app.database import engine, Base
-
-
-
+from contextlib import asynccontextmanager
+from app.services.embedding import get_embedding_model
 
 Base.metadata.create_all(bind=engine)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup phase: Load ML model Before accepting incomming traffic
+    get_embedding_model()
+    yield
+    # clean-up
 
 app = FastAPI(title = "Gyani API", version = "0.1.0")
 
