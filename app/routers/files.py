@@ -10,19 +10,20 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse
-from sqlalchemy import cast, type_coerce
+from sqlalchemy import String, cast  # <-- Added String import here
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
 from app.core.redis import get_redis_pool
-from app.database import  get_db
+from app.database import get_db
 from app.helpers.file_helpers import (
     is_processable_file,
     remove_file_from_disk,
     save_upload_file_to_disk,
 )
 from app.models.file import FileAttachment, OCRStatus
+from app.models.note import Note
 from app.models.user import User
 from app.schemas.file import FileOut
 
@@ -136,7 +137,15 @@ def delete_file(
             status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
         )
 
-    # Safely cleanup file on disk and remove row from DB
-    remove_file_from_disk(db_file.file_path)
+    # A generated note may reference this file as its source document.
+    db.query(Note).filter(Note.source_file_id == db_file.id).update(
+        {Note.source_file_id: None}, synchronize_session=False
+    )
     db.delete(db_file)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    remove_file_from_disk(db_file.file_path)

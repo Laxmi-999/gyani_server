@@ -15,15 +15,8 @@ async def lifespan(app: FastAPI):
     yield
     # clean-up
 
-app = FastAPI(title = "Gyani API", version = "0.1.0")
+app = FastAPI(title="Gyani API", version="0.1.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 app.include_router(auth.router)
 app.include_router(notes.router)
 app.include_router(files.router)
@@ -37,3 +30,20 @@ def home():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# Keep CORS outside the application so even error responses from mutations
+# retain the headers the browser needs to report the real API error.
+app = CORSMiddleware(
+    app=app,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)

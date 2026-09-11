@@ -26,7 +26,7 @@ class Note(Base):
 
     # Reference to source file if created via OCR/File Upload
     source_file_id = Column(
-        Integer, ForeignKey("files.id"), nullable=True
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
     )
 
     embedding = Column(Vector(384), nullable=True)
@@ -48,5 +48,6 @@ class Note(Base):
     # Optional: Relationship pointing back to the specific source file that generated this note
     source_file = relationship(
         "FileAttachment",
-        foreign_keys=[source_file_id]
+        foreign_keys=[source_file_id],
+        passive_deletes=True,
     )
