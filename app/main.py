@@ -5,7 +5,10 @@ from app.models.file import FileAttachment
 from app.database import engine, Base
 from contextlib import asynccontextmanager
 from app.services.embedding import get_embedding_model
+from dotenv import load_dotenv
 
+
+load_dotenv()
 Base.metadata.create_all(bind=engine)
 
 @asynccontextmanager

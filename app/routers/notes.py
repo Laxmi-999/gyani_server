@@ -1,17 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, text
+import json
+import logging
+import os
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from openai import OpenAI
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
 
 from app.core.deps import get_current_user
 from app.database import get_db
+from app.helpers.perform_hybrid_search import perform_hybrid_search
 from app.models.note import Note
 from app.models.user import User
+from app.schemas.chat import ChatRequest, ChatResponse, SourceNote
 from app.schemas.note import NoteCreate, NoteOut, NoteUpdate
-from app.schemas.search import SearchResponse, NoteSearchResult, SearchType
+from app.schemas.search import NoteSearchResult, SearchResponse, SearchType
 from app.services.embedding import generate_embedding
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
+load_dotenv()
 
 @router.post("/", response_model=NoteOut, status_code=201)
 def create_note(
@@ -98,12 +108,11 @@ def search_notes(
     """
     Search notes using either Pure Semantic Search or Hybrid Search (Vector + Full-Text Keyword).
     """
-    query_vector = generate_embedding(q)
-
     # -------------------------------------------------------------
     # OPTION A: PURE SEMANTIC SEARCH
     # -------------------------------------------------------------
     if type == SearchType.SEMANTIC:
+        query_vector = generate_embedding(q)
         raw_results = (
             db.query(
                 Note,
@@ -134,50 +143,12 @@ def search_notes(
     # OPTION B: HYBRID SEARCH (Reciprocal Rank Fusion - RRF)
     # -------------------------------------------------------------
     else:
-        # Convert list of floats to PostgreSQL vector string format: '[0.12, -0.05, ...]'
-        vector_str = f"[{','.join(map(str, query_vector))}]"
-
-        # Combined SQL query running vector distance and full-text keyword search in parallel,
-        # both scoped to the current user's own notes
-        hybrid_sql = text("""
-            WITH semantic_search AS (
-                SELECT id, RANK() OVER (ORDER BY embedding <=> CAST(:vector AS vector)) AS rank
-                FROM notes
-                WHERE embedding IS NOT NULL AND owner_id = :owner_id
-                LIMIT 20
-            ),
-            keyword_search AS (
-                SELECT id, RANK() OVER (
-                    ORDER BY ts_rank_cd(
-                        to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(content, '')),
-                        plainto_tsquery('english', :query)
-                    ) DESC
-                ) AS rank
-                FROM notes
-                WHERE to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(content, '')) @@ plainto_tsquery('english', :query)
-                  AND owner_id = :owner_id
-                LIMIT 20
-            )
-            SELECT
-                n.id, n.title, n.content, n.entities, n.auto_tags,
-                (COALESCE(1.0 / (60 + s.rank), 0.0) + COALESCE(1.0 / (60 + k.rank), 0.0)) AS rrf_score
-            FROM notes n
-            LEFT JOIN semantic_search s ON n.id = s.id
-            LEFT JOIN keyword_search k ON n.id = k.id
-            WHERE (s.id IS NOT NULL OR k.id IS NOT NULL) AND n.owner_id = :owner_id
-            ORDER BY rrf_score DESC
-            LIMIT :limit;
-        """)
-
-        db_results = db.execute(
-            hybrid_sql,
-            {
-                "vector": vector_str,
-                "query": q,
-                "owner_id": current_user.id,
-                "limit": limit,
-            },
-        ).fetchall()
+        db_results = perform_hybrid_search(
+            db=db,
+            query_text=q,
+            owner_id=current_user.id,
+            limit=limit,
+        )
 
         formatted_results = [
             NoteSearchResult(
@@ -196,9 +167,113 @@ def search_notes(
         search_type=type,
         total=len(formatted_results),
         results=formatted_results,
-)
+    )
 
 
+@router.post("/chat", response_model=ChatResponse)
+def chat_with_notes(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    RAG Endpoint: Retrieves top 5 relevant notes for the user's question,
+    constructs an anti-hallucination prompt, and calls Groq Llama 3.3.
+    """
+    question_text = request.question.strip()
+    if not question_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Question cannot be empty."
+        )
+
+    # 1. Fetch relevant notes via SQL-level hybrid search
+    search_rows = perform_hybrid_search(
+        db=db,
+        query_text=question_text,
+        owner_id=current_user.id,
+        limit=5,
+    )
+
+    # 2. Handle no-relevant-notes case explicitly
+    if not search_rows:
+        return ChatResponse(
+            answer="I couldn't find any relevant notes to answer your question.",
+            sources=[]
+        )
+
+    # 3. Build context blocks and sources list
+    context_blocks = []
+    sources = []
+    for row in search_rows:
+        context_blocks.append(f"--- Note ID: {row.id} | Title: {row.title} ---\n{row.content}")
+        sources.append(SourceNote(id=row.id, title=row.title))
+
+    combined_context = "\n\n".join(context_blocks)
+
+    # 4. Construct Anti-Hallucination Prompt
+    system_prompt = (
+        "You are a helpful assistant. Answer the user's question ONLY using the provided retrieved notes context. "
+        "If the answer cannot be found in the provided notes, clearly state: 'I could not find the answer in your notes.' "
+        "Do not use external knowledge or fabricate information outside of this context."
+    )
+
+    user_prompt = f"""CONTEXT NOTES:
+{combined_context}
+
+USER QUESTION:
+{question_text}
+"""
+
+    # 5. Call Groq API via OpenAI-compatible SDK
+    # 5. Call Groq API via OpenAI-compatible SDK
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GROQ_API_KEY environment variable is not set."
+        )
+
+    llm_client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=api_key,
+    )
+
+    # Set default directly to an active model on your tier
+    target_model = "llama-3.1-8b-instant"
+
+    try:
+        available_models = [m.id for m in llm_client.models.list().data]
+        candidates = [
+            "llama-3.1-8b-instant",
+            "llama-3.3-70b-specdec",
+            "llama3-8b-8192",
+            "mixtral-8x7b-32768",
+        ]
+        for cand in candidates:
+            if cand in available_models:
+                target_model = cand
+                break
+        logger.info(f"[RAG Chat] Successfully resolved model: {target_model}")
+    except Exception as e:
+        logger.warning(f"[RAG Chat] Failed to query Groq models ({e}). Defaulting to fallback model: {target_model}")
+
+    try:
+        response = llm_client.chat.completions.create(
+            model=target_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.1,
+        )
+        answer = response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"[RAG Chat Error]: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate an answer from the intelligence engine."
+        )
 
 @router.get("/{note_id}", response_model=NoteOut)
 def get_note(
@@ -207,11 +282,6 @@ def get_note(
     current_user: User = Depends(get_current_user),
 ):
     return _get_owned_note(db, note_id, current_user.id)
-
-
-
-
-
 
 
 @router.patch("/{note_id}", response_model=NoteOut)
