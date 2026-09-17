@@ -10,6 +10,6 @@ class SourceNote(BaseModel):
 
 class ChatResponse(BaseModel):
     answer:str
-    Sources: List[SourceNote]
+    sources: List[SourceNote]
 
     

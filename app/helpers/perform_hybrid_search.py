@@ -3,7 +3,13 @@ from sqlalchemy.orm import Session
 from app.services.embedding import generate_embedding
 
 
-def perform_hybrid_search(db: Session, query_text: str, owner_id: int, limit: int = 5):
+def perform_hybrid_search(
+    db: Session,
+    query_text: str,
+    owner_id: int,
+    limit: int = 5,
+    similarity_threshold: float = 0.6,  # cosine distance cutoff — lower = stricter
+):
     """Executes SQL-level Reciprocal Rank Fusion (RRF) search across vector embeddings and keywords."""
     query_vector = generate_embedding(query_text)
     vector_str = f"[{','.join(map(str, query_vector))}]"
@@ -12,7 +18,9 @@ def perform_hybrid_search(db: Session, query_text: str, owner_id: int, limit: in
         WITH semantic_search AS (
             SELECT id, RANK() OVER (ORDER BY embedding <=> CAST(:vector AS vector)) AS rank
             FROM notes
-            WHERE embedding IS NOT NULL AND owner_id = :owner_id
+            WHERE embedding IS NOT NULL
+              AND owner_id = :owner_id
+              AND embedding <=> CAST(:vector AS vector) < :threshold
             LIMIT 20
         ),
         keyword_search AS (
@@ -45,5 +53,6 @@ def perform_hybrid_search(db: Session, query_text: str, owner_id: int, limit: in
             "query": query_text,
             "owner_id": owner_id,
             "limit": limit,
+            "threshold": similarity_threshold,
         },
     ).fetchall()

@@ -1,24 +1,26 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import  CORSMiddleware
-from app.routers import auth, notes,files
-from app.models.file import FileAttachment
-from app.database import engine, Base
 from contextlib import asynccontextmanager
-from app.services.embedding import get_embedding_model
 from dotenv import load_dotenv
-
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
+
+from app.database import Base, engine
+from app.models.file import FileAttachment
+from app.routers import auth, files, notes
+from app.services.embedding import get_embedding_model
+
 Base.metadata.create_all(bind=engine)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup phase: Load ML model Before accepting incomming traffic
+    # Startup phase: Load ML model before accepting incoming traffic
     get_embedding_model()
     yield
-    # clean-up
+    # Cleanup phase
 
-app = FastAPI(title="Gyani API", version="0.1.0")
+# Pass lifespan into the FastAPI constructor
+app = FastAPI(title="Gyani API", version="0.1.0", lifespan=lifespan)
 
 app.include_router(auth.router)
 app.include_router(notes.router)
@@ -26,17 +28,8 @@ app.include_router(files.router)
 
 @app.get("/")
 def home():
-    print("welcome to home")
     return {"Hello world"}
 
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-# Keep CORS outside the application so even error responses from mutations
-# retain the headers the browser needs to report the real API error.
 app = CORSMiddleware(
     app=app,
     allow_origins=[

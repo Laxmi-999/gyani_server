@@ -16,12 +16,20 @@ from app.schemas.chat import ChatRequest, ChatResponse, SourceNote
 from app.schemas.note import NoteCreate, NoteOut, NoteUpdate
 from app.schemas.search import NoteSearchResult, SearchResponse, SearchType
 from app.services.embedding import generate_embedding
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
-load_dotenv()
+
+
+MAX_CHARS_PER_NOTE = 1500  # roughly ~375 tokens per note, adjust as needed
+
+def truncate_content(text: str, max_chars: int = MAX_CHARS_PER_NOTE) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rsplit(" ", 1)[0] + "... [truncated]"
 
 @router.post("/", response_model=NoteOut, status_code=201)
 def create_note(
@@ -170,6 +178,7 @@ def search_notes(
     )
 
 
+
 @router.post("/chat", response_model=ChatResponse)
 def chat_with_notes(
     request: ChatRequest,
@@ -177,8 +186,8 @@ def chat_with_notes(
     current_user: User = Depends(get_current_user),
 ):
     """
-    RAG Endpoint: Retrieves top 5 relevant notes for the user's question,
-    constructs an anti-hallucination prompt, and calls Groq Llama 3.3.
+    RAG Endpoint: Retrieves the top relevant notes for the user's question,
+    constructs an anti-hallucination prompt, and calls a Groq-hosted model.
     """
     question_text = request.question.strip()
     if not question_text:
@@ -202,16 +211,18 @@ def chat_with_notes(
             sources=[]
         )
 
-    # 3. Build context blocks and sources list
+    # 3. Build context blocks and sources list (with per-note truncation to avoid
+    # exceeding the model's context window)
     context_blocks = []
     sources = []
     for row in search_rows:
-        context_blocks.append(f"--- Note ID: {row.id} | Title: {row.title} ---\n{row.content}")
+        truncated = truncate_content(row.content or "")
+        context_blocks.append(f"--- Note ID: {row.id} | Title: {row.title} ---\n{truncated}")
         sources.append(SourceNote(id=row.id, title=row.title))
 
     combined_context = "\n\n".join(context_blocks)
 
-    # 4. Construct Anti-Hallucination Prompt
+    # 4. Construct anti-hallucination prompt
     system_prompt = (
         "You are a helpful assistant. Answer the user's question ONLY using the provided retrieved notes context. "
         "If the answer cannot be found in the provided notes, clearly state: 'I could not find the answer in your notes.' "
@@ -226,8 +237,7 @@ USER QUESTION:
 """
 
     # 5. Call Groq API via OpenAI-compatible SDK
-    # 5. Call Groq API via OpenAI-compatible SDK
-    api_key = os.getenv("GROQ_API_KEY", "")
+    api_key = settings.groq_api_key
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -239,25 +249,10 @@ USER QUESTION:
         api_key=api_key,
     )
 
-    # Set default directly to an active model on your tier
-    target_model = "llama-3.1-8b-instant"
+    # 6. Use a known-good chat model for this account (verified via check_models.py)
+    target_model = "openai/gpt-oss-20b"
 
-    try:
-        available_models = [m.id for m in llm_client.models.list().data]
-        candidates = [
-            "llama-3.1-8b-instant",
-            "llama-3.3-70b-specdec",
-            "llama3-8b-8192",
-            "mixtral-8x7b-32768",
-        ]
-        for cand in candidates:
-            if cand in available_models:
-                target_model = cand
-                break
-        logger.info(f"[RAG Chat] Successfully resolved model: {target_model}")
-    except Exception as e:
-        logger.warning(f"[RAG Chat] Failed to query Groq models ({e}). Defaulting to fallback model: {target_model}")
-
+    # 7. Generate the answer
     try:
         response = llm_client.chat.completions.create(
             model=target_model,
@@ -270,11 +265,18 @@ USER QUESTION:
         answer = response.choices[0].message.content.strip()
     except Exception as e:
         logger.error(f"[RAG Chat Error]: {e}")
+        if "reduce the length" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Your question matched notes with too much content to process at once. Try a more specific question."
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate an answer from the intelligence engine."
         )
 
+    # 8. Return the answer with its sources
+    return ChatResponse(answer=answer, sources=sources)
 @router.get("/{note_id}", response_model=NoteOut)
 def get_note(
     note_id: int,
