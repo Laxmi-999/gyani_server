@@ -1,6 +1,10 @@
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.services.embedding import generate_embedding
+import logging
+
+
+logger = logging.getLogger()
 
 
 def perform_hybrid_search(
@@ -27,12 +31,12 @@ def perform_hybrid_search(
             SELECT id, RANK() OVER (
                 ORDER BY ts_rank_cd(
                     to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(content, '')),
-                    plainto_tsquery('english', :query)
+                    websearch_to_tsquery('english', :query)
                 ) DESC
             ) AS rank
             FROM notes
-            WHERE to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(content, '')) @@ plainto_tsquery('english', :query)
-              AND owner_id = :owner_id
+            WHERE to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(content, '')) @@ websearch_to_tsquery('english', :query)
+            AND owner_id = :owner_id
             LIMIT 20
         )
         SELECT
@@ -46,7 +50,7 @@ def perform_hybrid_search(
         LIMIT :limit;
     """)
 
-    return db.execute(
+    result=  db.execute(
         hybrid_sql,
         {
             "vector": vector_str,
@@ -56,3 +60,5 @@ def perform_hybrid_search(
             "threshold": similarity_threshold,
         },
     ).fetchall()
+    logger.info(f"[Hybrid Search] '{query_text}' -> {len(result)} results: {[(r.id, round(float(r.rrf_score), 4)) for r in result]}")
+    return result

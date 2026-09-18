@@ -2,15 +2,21 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-load_dotenv()
-
+import logging
 from app.database import Base, engine
 from app.models.file import FileAttachment
 from app.routers import auth, files, notes
 from app.services.embedding import get_embedding_model
 
+
 Base.metadata.create_all(bind=engine)
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

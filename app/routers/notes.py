@@ -17,6 +17,10 @@ from app.schemas.note import NoteCreate, NoteOut, NoteUpdate
 from app.schemas.search import NoteSearchResult, SearchResponse, SearchType
 from app.services.embedding import generate_embedding
 from app.config import settings
+from app.helpers.perform_hybrid_search import perform_hybrid_search
+from app.helpers.query_expansion import expand_query_variants, merge_search_results
+from app.helpers.context_truncation import truncate_content
+from app.helpers.query_expansion import expand_query_variants, merge_search_results, strip_language_directive
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +28,8 @@ router = APIRouter(prefix="/notes", tags=["notes"])
 
 
 
-MAX_CHARS_PER_NOTE = 1500  # roughly ~375 tokens per note, adjust as needed
 
-def truncate_content(text: str, max_chars: int = MAX_CHARS_PER_NOTE) -> str:
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars].rsplit(" ", 1)[0] + "... [truncated]"
+
 
 @router.post("/", response_model=NoteOut, status_code=201)
 def create_note(
@@ -186,8 +186,9 @@ def chat_with_notes(
     current_user: User = Depends(get_current_user),
 ):
     """
-    RAG Endpoint: Retrieves the top relevant notes for the user's question,
-    constructs an anti-hallucination prompt, and calls a Groq-hosted model.
+    RAG Endpoint: Expands the question into alternate phrasings for cross-language
+    retrieval, searches with all variants, constructs an anti-hallucination prompt,
+    and calls a Groq-hosted model.
     """
     question_text = request.question.strip()
     if not question_text:
@@ -196,47 +197,7 @@ def chat_with_notes(
             detail="Question cannot be empty."
         )
 
-    # 1. Fetch relevant notes via SQL-level hybrid search
-    search_rows = perform_hybrid_search(
-        db=db,
-        query_text=question_text,
-        owner_id=current_user.id,
-        limit=5,
-    )
-
-    # 2. Handle no-relevant-notes case explicitly
-    if not search_rows:
-        return ChatResponse(
-            answer="I couldn't find any relevant notes to answer your question.",
-            sources=[]
-        )
-
-    # 3. Build context blocks and sources list (with per-note truncation to avoid
-    # exceeding the model's context window)
-    context_blocks = []
-    sources = []
-    for row in search_rows:
-        truncated = truncate_content(row.content or "")
-        context_blocks.append(f"--- Note ID: {row.id} | Title: {row.title} ---\n{truncated}")
-        sources.append(SourceNote(id=row.id, title=row.title))
-
-    combined_context = "\n\n".join(context_blocks)
-
-    # 4. Construct anti-hallucination prompt
-    system_prompt = (
-        "You are a helpful assistant. Answer the user's question ONLY using the provided retrieved notes context. "
-        "If the answer cannot be found in the provided notes, clearly state: 'I could not find the answer in your notes.' "
-        "Do not use external knowledge or fabricate information outside of this context."
-    )
-
-    user_prompt = f"""CONTEXT NOTES:
-{combined_context}
-
-USER QUESTION:
-{question_text}
-"""
-
-    # 5. Call Groq API via OpenAI-compatible SDK
+    # 1. Set up the LLM client early — needed for both query expansion and the final answer
     api_key = settings.groq_api_key
     if not api_key:
         raise HTTPException(
@@ -248,9 +209,65 @@ USER QUESTION:
         base_url="https://api.groq.com/openai/v1",
         api_key=api_key,
     )
-
-    # 6. Use a known-good chat model for this account (verified via check_models.py)
     target_model = "openai/gpt-oss-20b"
+
+
+    search_question = strip_language_directive(question_text)
+    if search_question != question_text:
+        logger.info(f"[RAG Chat] Stripped language directive for search: {search_question!r}")
+
+    # 3. Expand the search-safe question into alternate phrasings
+    query_variants = expand_query_variants(llm_client, target_model, search_question)
+    all_queries = [search_question] + query_variants
+    logger.info(f"[RAG Chat] Searching with query variants: {all_queries}")
+
+    # 4. Run hybrid search for every variant, then merge and de-duplicate results
+    result_sets = [
+        perform_hybrid_search(db=db, query_text=q, owner_id=current_user.id, limit=5)
+        for q in all_queries
+    ]
+    search_rows = merge_search_results(result_sets)[:5]
+    logger.info(
+        f"[RAG Chat] Retrieved {len(search_rows)} notes: "
+        f"{[(r.id, r.title, round(float(r.rrf_score), 4)) for r in search_rows]}"
+    )
+
+    # 4. Handle no-relevant-notes case explicitly
+    if not search_rows:
+        return ChatResponse(
+            answer="I couldn't find any relevant notes to answer your question.",
+            sources=[]
+        )
+
+    # 5. Build context blocks and sources list (with per-note truncation)
+    context_blocks = []
+    sources = []
+    for row in search_rows:
+        truncated = truncate_content(row.content or "")
+        context_blocks.append(f"--- Note ID: {row.id} | Title: {row.title} ---\n{truncated}")
+        sources.append(SourceNote(id=row.id, title=row.title))
+
+    combined_context = "\n\n".join(context_blocks)
+
+    # 6. Construct anti-hallucination prompt with explicit language rules
+    system_prompt = (
+        "You are a helpful assistant. Answer the user's question ONLY using the provided retrieved notes context. "
+        "If the answer cannot be found in the provided notes, clearly state: 'I could not find the answer in your notes.' "
+        "Do not use external knowledge or fabricate information outside of this context.\n\n"
+        "Language rules for your response:\n"
+        "1. If the user explicitly asks for the answer in a specific language, always follow that instruction.\n"
+        "2. Otherwise, if the user's question itself is written in a non-English script (e.g. Devanagari, Cyrillic), "
+        "respond in that same language.\n"
+        "3. Otherwise — including romanized/Latin-script versions of another language, or genuinely ambiguous "
+        "cases — respond in English by default."
+    )
+
+    user_prompt = f"""CONTEXT NOTES:
+{combined_context}
+
+USER QUESTION:
+{question_text}
+"""
 
     # 7. Generate the answer
     try:
@@ -277,6 +294,9 @@ USER QUESTION:
 
     # 8. Return the answer with its sources
     return ChatResponse(answer=answer, sources=sources)
+
+
+
 @router.get("/{note_id}", response_model=NoteOut)
 def get_note(
     note_id: int,
