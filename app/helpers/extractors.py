@@ -7,6 +7,9 @@ from pdf2image import convert_from_path
 import docx
 import openpyxl
 from bs4 import BeautifulSoup
+import io
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +67,43 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return extracted_text.strip()
 
 
+
+
 def extract_text_from_docx(docx_path: str) -> str:
-    """Extracts text paragraphs from Word documents (.docx)."""
+    """Extracts text from Word documents (.docx): regular paragraphs, tables,
+    and OCR'd text from any embedded images (e.g. pasted screenshots)."""
     try:
         doc = docx.Document(docx_path)
-        full_text = [paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()]
-        return "\n".join(full_text)
+        parts = []
+
+        # 1. Regular paragraph text
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                parts.append(paragraph.text.strip())
+
+        # 2. Table content
+        for table in doc.tables:
+            for row in table.rows:
+                row_cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if row_cells:
+                    parts.append(" | ".join(row_cells))
+
+        # 3. Embedded images (e.g. pasted screenshots) — run OCR on each
+        image_rels = [
+            rel for rel in doc.part.rels.values()
+            if rel.reltype == RT.IMAGE
+        ]
+        for i, rel in enumerate(image_rels):
+            try:
+                image_bytes = rel.target_part.blob
+                image = Image.open(io.BytesIO(image_bytes))
+                ocr_text = pytesseract.image_to_string(image).strip()
+                if ocr_text:
+                    parts.append(f"--- Embedded image {i + 1} (OCR) ---\n{ocr_text}")
+            except Exception as img_err:
+                logger.warning(f"[DOCX Extraction] Failed to OCR embedded image {i + 1}: {img_err}")
+
+        return "\n".join(parts)
     except Exception as e:
         logger.error(f"[DOCX Extraction Error]: {e}")
         return ""

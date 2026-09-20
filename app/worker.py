@@ -64,59 +64,41 @@ async def process_file_ocr(ctx: dict, file_id: int):
 
         # 3. Perform hybrid NLP entity extraction off-thread
         if extracted_text and extracted_text.strip():
-            logger.info(
-                f"[ARQ Worker] Running NLP entity extraction for file ID: {file_id}"
+            title = derive_note_title(db_file.filename, entities)
+            note_text_to_embed = f"{title}\n{extracted_text}"
+
+            embedding_vector = await asyncio.to_thread(
+                generate_embedding, note_text_to_embed
             )
-            entities = await asyncio.to_thread(
-                extract_entities_from_text, extracted_text
+
+            existing_note = (
+                db.query(Note).filter(Note.source_file_id == db_file.id).first()
             )
-            db_file.entities = entities
 
-            unique_tags = {
-                item.strip()
-                for items in entities.values()
-                if isinstance(items, list)
-                for item in items
-                if len(item.strip()) > 1
-            }
-            flattened_tags = sorted(list(unique_tags))
-
-        # 4. Create or Update corresponding Note record
-        title = derive_note_title(db_file.filename, entities)
-        note_text_to_embed = f"{title}\n{extracted_text or ''}"
-
-        # Generate embedding off-thread
-        embedding_vector = await asyncio.to_thread(
-            generate_embedding, note_text_to_embed
-        )
-
-        existing_note = (
-            db.query(Note).filter(Note.source_file_id == db_file.id).first()
-        )
-
-        if existing_note:
-            existing_note.title = title
-            existing_note.content = (
-                extracted_text or "No text could be extracted."
-            )
-            existing_note.entities = entities
-            existing_note.auto_tags = flattened_tags
-            existing_note.embedding = embedding_vector
-            db_file.note_id = existing_note.id
+            if existing_note:
+                existing_note.title = title
+                existing_note.content = extracted_text
+                existing_note.entities = entities
+                existing_note.auto_tags = flattened_tags
+                existing_note.embedding = embedding_vector
+                db_file.note_id = existing_note.id
+            else:
+                new_note = Note(
+                    owner_id=db_file.owner_id,
+                    title=title,
+                    content=extracted_text,
+                    entities=entities,
+                    auto_tags=flattened_tags,
+                    source_file_id=db_file.id,
+                    embedding=embedding_vector,
+                )
+                db.add(new_note)
+                db.flush()
+                db_file.note_id = new_note.id
         else:
-            new_note = Note(
-                owner_id=db_file.owner_id,
-                title=title,
-                content=extracted_text
-                or "No text could be extracted from this document.",
-                entities=entities,
-                auto_tags=flattened_tags,
-                source_file_id=db_file.id,
-                embedding=embedding_vector,
+            logger.warning(
+                f"[ARQ Worker] File ID {file_id} extracted no usable text — skipping note creation."
             )
-            db.add(new_note)
-            db.flush()
-            db_file.note_id = new_note.id
 
         # 5. Mark job as COMPLETED
         db_file.ocr_status = OCRStatus.COMPLETED.value
