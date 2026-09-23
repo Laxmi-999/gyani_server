@@ -58,12 +58,25 @@ async def process_file_ocr(ctx: dict, file_id: int):
             extract_text_from_file, db_file.file_path
         )
         db_file.extracted_text = extracted_text
-
         entities = {}
         flattened_tags = []
 
-        # 3. Perform hybrid NLP entity extraction off-thread
         if extracted_text and extracted_text.strip():
+            # Run NLP entity extraction (spaCy for standard/high-confidence text,
+            # Groq LLM fallback for non-Latin scripts, romanization, or low-confidence detection)
+            logger.info(f"[ARQ Worker] Running NLP entity extraction for file ID: {file_id}")
+            entities = await asyncio.to_thread(extract_entities_from_text, extracted_text)
+            db_file.entities = entities
+
+            unique_tags = {
+                item.strip()
+                for items in entities.values()
+                if isinstance(items, list)
+                for item in items
+                if len(item.strip()) > 1
+            }
+            flattened_tags = sorted(list(unique_tags))
+
             title = derive_note_title(db_file.filename, entities)
             note_text_to_embed = f"{title}\n{extracted_text}"
 

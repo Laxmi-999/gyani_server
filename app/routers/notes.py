@@ -21,11 +21,11 @@ from app.helpers.perform_hybrid_search import perform_hybrid_search
 from app.helpers.query_expansion import expand_query_variants, merge_search_results
 from app.helpers.context_truncation import truncate_content
 from app.helpers.query_expansion import expand_query_variants, merge_search_results, strip_language_directive
+from app.helpers.nlp import extract_entities_from_text
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/notes", tags=["notes"])
-
 
 
 
@@ -37,7 +37,23 @@ def create_note(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    note = Note(**note_in.model_dump(), owner_id=current_user.id)
+    entities = extract_entities_from_text(note_in.content) if note_in.content.strip() else {}
+    flattened_tags = sorted({
+        item.strip()
+        for items in entities.values()
+        if isinstance(items, list)
+        for item in items
+        if len(item.strip()) > 1
+    })
+    embedding_vector = generate_embedding(f"{note_in.title}\n{note_in.content}")
+
+    note = Note(
+        **note_in.model_dump(),
+        owner_id=current_user.id,
+        entities=entities,
+        auto_tags=flattened_tags,
+        embedding=embedding_vector,
+    )
     db.add(note)
     db.commit()
     db.refresh(note)
