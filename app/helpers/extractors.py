@@ -43,17 +43,19 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     """Extracts text from PDFs. Falls back to OCR via pdf2image if no native digital text is found."""
     extracted_text = ""
 
-    # Try native digital text extraction
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-                page_text = page.extract_text()
+                # x_tolerance controls how close characters must be to be merged into
+                # one word — lowering it from the default (3) helps prevent tightly-kerned
+                # or justified text (common in LaTeX-generated PDFs) from losing word
+                # boundaries entirely.
+                page_text = page.extract_text(x_tolerance=1, y_tolerance=3)
                 if page_text:
                     extracted_text += page_text + "\n"
     except Exception as e:
         logger.warning(f"[PDF Extraction] pdfplumber failed: {e}")
 
-    # Fallback: Run OCR on scanned PDF pages
     if not extracted_text.strip():
         logger.info(f"[PDF Extraction] No native text in {pdf_path}. Running OCR via pdf2image...")
         try:
